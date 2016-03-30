@@ -78,6 +78,7 @@ sub client_create {
                 client_error               => \&client_error,               # Error on client socket.
                 client_send                => \&client_send,                # sendet daten zum client
                 client_check_login_timeout => \&client_check_login_timeout, # delay nach starten der verbindung
+                client_send_alife_message  => \&client_send_alife_message,   # nach delay send alife command
 
 		#forward_client_input  => \&forward_client_input,   # forwardet client-inputs zum andern server
 		#forward_server_connect => \&forward_server_connect, # Connected to server.
@@ -514,7 +515,7 @@ sub _send_command_chunk
 {
 	my ($reciever_id, $input) = @_;
 	
-    my $chunk_size = length($input); #TODO:sicherstellen das < 255
+	my $chunk_size = length($input); #TODO:sicherstellen das < 255
 	
 	$poe_kernel->post($reciever_id => client_send => pack("C1",0).pack("C1", $chunk_size).$input); # 0 leitet command chunk ein
 }
@@ -555,7 +556,12 @@ sub _deleteUser
 ###################################################################################### client_send
 sub client_send {
     my ( $heap, $message ) = @_[ HEAP, ARG0 ];
-    exists( $heap->{wheel_client} ) and $heap->{wheel_client}->put($message);
+    if ( exists( $heap->{wheel_client} ) )
+    { 
+    	$poe_kernel->delay( client_send_alife_message => undef );
+    	$heap->{wheel_client}->put($message);
+    	$poe_kernel->delay( client_send_alife_message => 5 );
+    }
 }
 
 ###################################################################################### client_stop
@@ -586,6 +592,17 @@ sub client_check_login_timeout {
 	
     delete( $ipcount->{ $heap->{client_port} } );
     delete $heap->{wheel_client};
+    
+}
+
+###################################################################################### client_check_login_timeout
+sub client_send_alife_message {
+    my $heap = $_[HEAP];
+    my $user_id = $heap->{sid};
+    
+    _send_command_chunk( $user_id, pack("C1",0).pack("C1",255).pack("C1",0).pack("C1",0) );
+    
+    #$logger->log("[$heap->{sid}] Send alife message for $heap->{client_addr}:$heap->{client_port}\n");
     
 }
 
