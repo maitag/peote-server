@@ -6,18 +6,19 @@ package Peote::Client;
 
 use strict;
 use warnings;
-our $VERSION = "0.1";
+our $VERSION = "0.5";
 
 use POE qw( Wheel::ReadWrite Filter::Stream );
 
 # use Storable qw(freeze thaw);
 use Socket qw(inet_ntoa);
+use Protocol::WebSocket::Stateful;
+use Protocol::WebSocket::Message;
+use Protocol::WebSocket::Handshake::Server;
+use Protocol::WebSocket::Frame;
 use Data::Dumper;
-use Peote::Forwarder;
 use Peote::Joints;
 
-
-my $forwarder;
 
 my $config = {};
 my $logger = {};
@@ -43,8 +44,6 @@ sub new {
 sub client_create {
     my ( $self, $socket, $client_addr, $client_port ) = @_;
 
-    $forwarder = Peote::Forwarder->new( $config, $logger );
-
     $client_addr = inet_ntoa($client_addr);
 
     $logger->log( "client create " . $client_addr . ":" . $client_port . "\n" );
@@ -60,30 +59,17 @@ sub client_create {
     if ( $anz_connections_per_ip <= $config->{'max_connections_per_ip'} ) {
 
         POE::Session->create(
-            object_states => [
-                $forwarder => {
-                    forward_client_input =>  'forward_client_input',    # forwardet client-inputs zum andern server
-                    forward_server_connect =>'forward_server_connect',    # Connected to server
-                    forward_server_input =>  'forward_server_input',      # Server sent something
-                    forward_server_error =>  'forward_server_error',      # Error on server socket
-                    server_handle_flushed => 'server_handle_flushed'    # FLUSH
-                }
-            ],
             inline_states => {
                 _start => \&client_start,
                 _stop  => \&client_stop,
-                client_input_policy        => \&client_input_policy,        # am anfang policy checken
+                client_handshake           => \&client_handshake,        # am anfang policy checken
                 #client_input_cmd           => \&client_input_cmd,           # auf ein gueltiges commando checken
                 client_input               => \&client_input,               # ES KOMMT WAS AN
+                client_input_ws            => \&client_input_ws,            # ES KOMMT WAS AN (via websockets)
                 client_error               => \&client_error,               # Error on client socket.
                 client_send                => \&client_send,                # sendet daten zum client
                 client_check_login_timeout => \&client_check_login_timeout, # delay nach starten der verbindung
                 client_send_alife_message  => \&client_send_alife_message,   # nach delay send alife command
-
-		#forward_client_input  => \&forward_client_input,   # forwardet client-inputs zum andern server
-		#forward_server_connect => \&forward_server_connect, # Connected to server.
-		#forward_server_input => \&forward_server_input,  # Server sent something.
-		#forward_server_error => \&forward_server_error,  # Error on server socket.
 
                 client_handle_flushed => \&client_handle_flushed
 
@@ -117,6 +103,8 @@ sub client_start {
     $heap->{'command'} = undef;
     $heap->{'command_nr'} = undef;
 	
+	$heap->{state} = 'handshake';
+	$heap->{is_websocket} = 0;
 
     $logger->log("[$heap->{sid}] Accepted connection from $client_addr:$client_port\n");
 
@@ -124,7 +112,7 @@ sub client_start {
         Handle     => $socket,
         Driver     => POE::Driver::SysRW->new,
         Filter     => POE::Filter::Stream->new,
-        InputEvent => 'client_input_policy',    # nur beim ersten mal, danach wird auf client_input umgeschaltet
+        InputEvent => 'client_handshake',
         ErrorEvent => 'client_error',
     );
 
@@ -133,70 +121,87 @@ sub client_start {
 
 }
 
-###################################################################################### client_input_policy
-sub client_input_policy {
-    my ( $heap, $input ) = @_[ HEAP, ARG0 ];
+###################################################################################### client_handshake
+sub client_handshake {
+    my ($session,  $heap, $input ) = @_[ SESSION, HEAP, ARG0 ];
 
-    #my @myArray = unpack( 'C*', $input );
-    #my $myStringHex = '';
-    #foreach my $c (@myArray) { $myStringHex .= "," . sprintf( "%lx", $c ); }
-    #print "$myStringHex\n";
-	#print $input;
-    if ( $input eq ( '<policy-file-request/>' . pack( "b", 0 ) ) ) {  # TODO: hier koennten noch RESTE vom eigentlichem $input hinten dran haengen?
-        my $policy = '<?xml version="1.0"?>'
-          . '<!DOCTYPE cross-domain-policy SYSTEM "/xml/dtds/cross-domain-policy.dtd">'
-          . '<cross-domain-policy>'
-          . '<site-control permitted-cross-domain-policies="master-only"/>'
-          . '<allow-access-from domain="'
-          . $config->{'flash_policy_domain'}
-          . '" to-ports="'
-          . $config->{'flash_policy_port'} . '" />'
-          . '</cross-domain-policy>'
-          . pack( "b", 0 );
-        if ( exists( $heap->{wheel_client} ) ) {
-            $logger->log("[$heap->{sid}] Flashclient from $heap->{client_addr}:$heap->{client_port} gets his policy\n");
-            $heap->{wheel_client}->put($policy);
-        }
-        
-        $heap->{wheel_client}->event( InputEvent => 'client_input' );
-		# delay loeschen
-        $poe_kernel->delay( client_check_login_timeout => undef ); 		
-    }
-    elsif ( $input =~ /^GET/ ) {                # TODO: hier als Alternative noch einen Webserver.pm integrieren!
-    #    $forwarder->forwarder_create(
-    #        $heap, $input,
-    #        $config->{'forward_http_address'},
-    #        $config->{'forward_http_port'}
-    #    );
-        
-        if ( exists( $heap->{wheel_client} ) ) {
-			my $answer = '';
-            $logger->log("[$heap->{sid}] Websocket from $heap->{client_addr}:$heap->{client_port} gets his answer\n");
-            $heap->{wheel_client}->put($answer);
-        }
- 		$heap->{wheel_client}->event( InputEvent => 'client_input' ); #vorerst
-		# delay loeschen
-        $poe_kernel->delay( client_check_login_timeout => undef ); 
-
-    }
-    #elsif (substr($input,0,3) eq "\x16\x03\x01")
-    #{
-    #print "FORWARDING ZUM HTTPS SERVER \n";
-    #$forwarder -> forwarder_create($heap, $input, $config->{'forward_https_address'}, $config->{'forward_https_port'});
-    #}
-    else {
-        $logger->log("[$heap->{sid}] Flashclient $heap->{client_addr}:$heap->{client_port} has already his policy\n");
-
-        # SEMMI: evtl. kam '<policy-file-request/>' nicht in einem Stueck !!!!!
-
-        #&client_input(@_);
-		client_input( @_ );
-		# $heap->{'input_left'} . $input;
+	$heap->{input_left} .= $input;
+	
+	if ( $heap->{state} eq 'handshake' )
+	{
+		# check first incomming byte to see whats may going on ;)
+		if ($input =~ /^</)
+		{
+			$config->{debug} && print "waiting for full flash policy request\n";
+			$heap->{state} = 'handshake-flash';
+		}
+		elsif ($input =~ /^G/)
+		{
+			$config->{debug} && print "waiting for full websocket handshake\n";
+			$heap->{ws_handshake} = Protocol::WebSocket::Handshake::Server->new;
+			$heap->{ws_frame}     = Protocol::WebSocket::Frame->new;
+			$heap->{state} = 'handshake-websocket';
+		}
+		else
+		{
+			$config->{debug} && print "no handshake\n";
+			$heap->{state} = 'connected';
+		}
+	}
+	
+	##########################################
+	
+	if ( $heap->{state} eq 'handshake-flash' )
+	{
+		if ($heap->{input_left} =~ s/^(<policy-file-request\/>\0)//  )
+		{
+			my $policy = '<?xml version="1.0"?>';
+			$policy .= '<!DOCTYPE cross-domain-policy SYSTEM "/xml/dtds/cross-domain-policy.dtd">';
+			$policy .= '<cross-domain-policy>';
+			$policy .= '<site-control permitted-cross-domain-policies="master-only"/>';
+			$policy .= '<allow-access-from domain="'.$config->{'flash_policy_domain'}.'" to-ports="'.$config->{'flash_policy_port'}.'" />';
+			$policy .= '</cross-domain-policy>';
+			$policy .= pack("b",0);
+			log_("[$heap->{log}] Client $heap->{peer_host}:$heap->{peer_port} gets flash policy\n",'ACCESS');
+			exists ( $heap->{wheel_client} ) and $heap->{wheel_client}->put($policy);
+			$heap->{state} = 'connected';
+		}
+	}
+	elsif ( $heap->{state} eq 'handshake-websocket' )
+	{
+		$heap->{ws_handshake}->parse($heap->{input_left});
+		$config->{debug} && print "pending after parse out for websocket: '".$heap->{input_left}."'\n";
 		
-		$heap->{wheel_client}->event( InputEvent => 'client_input' );
+		if ($heap->{ws_handshake}->is_done)
+		{
+			$heap->{is_websocket} = 1;
+			exists ( $heap->{wheel_client} ) and $heap->{wheel_client}->put($heap->{ws_handshake}->to_string);
+			$heap->{state} = 'connected';
+		}
+
+	}
+	
+	##########################################
+	
+	if ( $heap->{state} eq 'connected' )
+	{		
+		#my $bytesCSL = ''; foreach my $c (unpack( 'C*', $heap->{input_left} )) { $bytesCSL .= sprintf( "%lu", $c )." "; }
+		#print "connected >$bytesCSL\n";
+		if ($heap->{is_websocket})
+		{
+			$heap->{wheel_client}->event( InputEvent => 'client_input_ws' );
+			$poe_kernel->post( $session, 'client_input_ws', '' );
+		}
+		else{
+			$heap->{wheel_client}->event( InputEvent => 'client_input' );
+			$poe_kernel->post( $session, 'client_input', '');
+		}
+		
 		# delay loeschen
-        $poe_kernel->delay( client_check_login_timeout => undef ); # TODO.. nur wenn was sinnvolles reinkommt DOS-ATTACK!
-    }
+        $poe_kernel->delay( client_check_login_timeout => undef );
+		# TODO.. nur wenn was sinnvolles reinkommt DOS-ATTACK!
+	}
+	
 }
 
 ###################################################################################### client_input
@@ -204,12 +209,148 @@ sub client_input {
     my ( $heap, $input ) = @_[ HEAP, ARG0 ];
     $config->{'debug'} && print "\nCLIENT INPUT \n\n";
    
+    _parse_client_input( $heap, $input );
+}
+
+###################################################################################### client_input_ws
+sub client_input_ws {
+    my ( $heap, $input ) = @_[ HEAP, ARG0 ];
+    $config->{'debug'} && print "\nCLIENT INPUT \n\n";
+   
+	$heap->{ws_frame}->append($input);
+	while (my $message = $heap->{ws_frame}->next_bytes)
+    {
+		_parse_client_input( $heap, $message );
+	}
+
+}
+
+###################################################################################### client_send
+sub client_send {
+    my ( $heap, $message ) = @_[ HEAP, ARG0 ];
+    if ( exists( $heap->{wheel_client} ) )
+    { 
+    	$poe_kernel->delay( client_send_alife_message => undef );
+		if ($heap->{is_websocket})
+		{
+			$heap->{wheel_client}->put( Protocol::WebSocket::Frame->new(buffer => $message, type => 'binary')->to_bytes );
+		}
+		else{
+			$heap->{wheel_client}->put($message);
+		}
+    	$poe_kernel->delay( client_send_alife_message => 5 );
+    }
+}
+
+###################################################################################### client_stop
+sub client_stop {
+    my $heap = $_[HEAP];
     my $user_id = $heap->{sid};
-	
-    #$input .= $heap->{'input_left'}; # TODO: hier sicherheitshalber mal checken ob nicht so: $input = $heap->{'input_left'}.$input;
-    $input = $heap->{'input_left'} . $input;
-	$heap->{'input_left'} = ""; 
     
+    $config->{'debug'} && print "CLIENT STOP\n";
+	
+    delete( $ipcount->{ $heap->{client_port} } );
+
+    $logger->log("[$heap->{sid}] Closing session from $heap->{client_addr}:$heap->{client_port}\n");
+}
+
+###################################################################################### client_check_login_timeout
+sub client_check_login_timeout {
+    my $heap = $_[HEAP];
+    my $user_id = $heap->{sid};
+    
+    
+    $logger->log("[$heap->{sid}] CHECKLogin-Timeout for $heap->{client_addr}:$heap->{client_port}\n");
+    $logger->log("[$heap->{sid}] Login-Timeout for $heap->{client_addr}:$heap->{client_port}\n");
+    
+    
+    # TODO ???
+    
+    _deleteUser($user_id);
+	
+    delete( $ipcount->{ $heap->{client_port} } );
+    delete $heap->{wheel_client};
+    
+}
+
+###################################################################################### client_send_alife_message
+sub client_send_alife_message {
+    my $heap = $_[HEAP];
+    my $user_id = $heap->{sid};
+    
+    _send_command_chunk( $user_id, pack("C1",0).pack("C1",255).pack("C1",0).pack("C1",0) );
+    
+    #$logger->log("[$heap->{sid}] Send alife message for $heap->{client_addr}:$heap->{client_port}\n");
+    
+}
+
+###################################################################################### client_error
+sub client_error {
+    my ( $kernel, $heap, $operation, $errnum, $errstr ) = @_[ KERNEL, HEAP, ARG0, ARG1, ARG2 ];
+    my $user_id = $heap->{sid};
+    
+    $config->{'debug'} && print "\n\nCLIENT_ERROR:(" . $operation . ")\n";
+    
+    _deleteUser($user_id); # TODO: errnmr mit uebergeben, damit user noch informiert werden kann ob socket-close oder socket-error
+    delete( $ipcount->{ $heap->{client_port} } );
+	
+
+    # delay loeschen
+    $poe_kernel->delay( client_check_login_timeout => undef );
+
+    if ($errnum) {
+        $logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} connection encountered $operation error $errnum: $errstr\n");
+    }
+
+    $logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} closed connection.\n");
+
+    if ( $heap->{wheel_client}->get_driver_out_octets() > 0 && !$errnum ) {
+        $config->{'debug'} && print "client out octets:" . $heap->{wheel_client}->get_driver_out_octets() . "\n";
+        $heap->{wheel_client}->event( FlushedEvent => "client_handle_flushed" );
+        $heap->{wheel_client}->flush();
+
+        #delete $heap->{wheel_client};
+    }
+    else {
+        delete $heap->{wheel_client};
+    }
+
+    if ( exists( $heap->{wheel_server} ) ) {
+        if ( $heap->{wheel_server}->get_driver_out_octets() > 0 && !$errnum ) {
+            $config->{'debug'} && print "server out octets:" . $heap->{wheel_server}->get_driver_out_octets() . "\n";
+            $heap->{wheel_server}->event( FlushedEvent => 'server_handle_flushed' );
+            $heap->{wheel_server}->flush();
+
+            #delete $heap->{wheel_server};
+        }
+        else {
+            delete $heap->{wheel_server};
+        }
+    }
+
+}
+
+###################################################################################### client_handle_flushed
+sub client_handle_flushed {
+
+    #my $wheel_id = $_[ARG0];
+    #delete $_[HEAP]{wheel}{$wheel_id};
+    $config->{'debug'} && print "LAST CLIENT FLUSH!\n";
+    my ($heap) = $_[HEAP];
+    delete $heap->{wheel_client};
+
+}
+
+
+###################################################################################### JOINT
+###################################################################################### PROTOCOL
+
+sub _parse_client_input {
+    my ( $heap, $input ) = @_;
+	
+    $input = $heap->{'input_left'} . $input;
+    $heap->{'input_left'} = "";   
+    my $user_id = $heap->{sid};
     while (length($input) > 0)  # solange noch input vorhanden ist
     {   
 		$config->{'debug'} && print 'length($input):'.length($input)."\n";
@@ -251,7 +392,7 @@ sub client_input {
 						
 						my $joint_nr = $joints->create($user_id,$joint_id);
 
-						if ($joint_nr > -1)
+						if ($joint_nr > -1) # to only allow from local server: && $heap->{client_addr} eq '127.0.0.1')
 						{	$logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} GIVE JOINT: '$joint_id'\n");
 							# dem Clienten die command_nr und Joint-Nummer senden!                 -> 0 heisst OK (kein fehler)
 							_send_command_chunk( $user_id, pack("C1",$heap->{'command_nr'}).pack("C1",0).pack("C1",$joint_nr));
@@ -471,7 +612,7 @@ sub client_input {
     
 
 }
-
+######################################################################################
 sub _send_anz_bytes
 {
     my ( $bytes_left, $first, $input, $reciever_id ) = @_;
@@ -492,7 +633,7 @@ sub _send_anz_bytes
      
     return($bytes_left, $input);
 }
-
+######################################################################################
 sub _send_chunk
 {
 	my ($reciever_id, $input) = @_;
@@ -510,7 +651,7 @@ sub _send_chunk
 		$poe_kernel->post($reciever_id => client_send => pack("C1", ($chunk_size >> 8) + 128 ).pack("C1", $chunk_size & 255).$input );
 	}
 }
-
+######################################################################################
 sub _send_command_chunk
 {
 	my ($reciever_id, $input) = @_;
@@ -519,7 +660,7 @@ sub _send_command_chunk
 	
 	$poe_kernel->post($reciever_id => client_send => pack("C1",0).pack("C1", $chunk_size).$input); # 0 leitet command chunk ein
 }
-
+######################################################################################
 sub _deleteUser
 {
 	my $user_id = $_[0];
@@ -552,117 +693,6 @@ sub _deleteUser
 	}
 
 }
-
-###################################################################################### client_send
-sub client_send {
-    my ( $heap, $message ) = @_[ HEAP, ARG0 ];
-    if ( exists( $heap->{wheel_client} ) )
-    { 
-    	$poe_kernel->delay( client_send_alife_message => undef );
-    	$heap->{wheel_client}->put($message);
-    	$poe_kernel->delay( client_send_alife_message => 5 );
-    }
-}
-
-###################################################################################### client_stop
-sub client_stop {
-    my $heap = $_[HEAP];
-    my $user_id = $heap->{sid};
-
-	$config->{'debug'} && print "CLIENT STOP\n";
-	
-    delete( $ipcount->{ $heap->{client_port} } );
-
-    $logger->log("[$heap->{sid}] Closing session from $heap->{client_addr}:$heap->{client_port}\n");
-}
-
-###################################################################################### client_check_login_timeout
-sub client_check_login_timeout {
-    my $heap = $_[HEAP];
-    my $user_id = $heap->{sid};
-    
-    
-    $logger->log("[$heap->{sid}] CHECKLogin-Timeout for $heap->{client_addr}:$heap->{client_port}\n");
-    $logger->log("[$heap->{sid}] Login-Timeout for $heap->{client_addr}:$heap->{client_port}\n");
-    
-    
-    # TODO ???
-    
-    _deleteUser($user_id);
-	
-    delete( $ipcount->{ $heap->{client_port} } );
-    delete $heap->{wheel_client};
-    
-}
-
-###################################################################################### client_check_login_timeout
-sub client_send_alife_message {
-    my $heap = $_[HEAP];
-    my $user_id = $heap->{sid};
-    
-    _send_command_chunk( $user_id, pack("C1",0).pack("C1",255).pack("C1",0).pack("C1",0) );
-    
-    #$logger->log("[$heap->{sid}] Send alife message for $heap->{client_addr}:$heap->{client_port}\n");
-    
-}
-
-###################################################################################### client_error
-sub client_error {
-    my ( $kernel, $heap, $operation, $errnum, $errstr ) = @_[ KERNEL, HEAP, ARG0, ARG1, ARG2 ];
-    my $user_id = $heap->{sid};
-	
-	$config->{'debug'} && print "\n\nCLIENT_ERROR:(" . $operation . ")\n";
-    
-    _deleteUser($user_id); # TODO: errnmr mit uebergeben, damit user noch informiert werden kann ob socket-close oder socket-error
-    delete( $ipcount->{ $heap->{client_port} } );
-	
-
-    # delay loeschen
-    $poe_kernel->delay( client_check_login_timeout => undef );
-
-    if ($errnum) {
-        $logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} connection encountered $operation error $errnum: $errstr\n");
-    }
-
-    $logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} closed connection.\n");
-
-    if ( $heap->{wheel_client}->get_driver_out_octets() > 0 && !$errnum ) {
-        $config->{'debug'} && print "client out octets:" . $heap->{wheel_client}->get_driver_out_octets() . "\n";
-        $heap->{wheel_client}->event( FlushedEvent => "client_handle_flushed" );
-        $heap->{wheel_client}->flush();
-
-        #delete $heap->{wheel_client};
-    }
-    else {
-        delete $heap->{wheel_client};
-    }
-
-    if ( exists( $heap->{wheel_server} ) ) {
-        if ( $heap->{wheel_server}->get_driver_out_octets() > 0 && !$errnum ) {
-            $config->{'debug'} && print "server out octets:" . $heap->{wheel_server}->get_driver_out_octets() . "\n";
-            $heap->{wheel_server}->event( FlushedEvent => 'server_handle_flushed' );
-            $heap->{wheel_server}->flush();
-
-            #delete $heap->{wheel_server};
-        }
-        else {
-            delete $heap->{wheel_server};
-        }
-    }
-
-}
-
-###################################################################################### client_handle_flushed
-sub client_handle_flushed {
-
-    #my $wheel_id = $_[ARG0];
-    #delete $_[HEAP]{wheel}{$wheel_id};
-    $config->{'debug'} && print "LAST CLIENT FLUSH!\n";
-    my ($heap) = $_[HEAP];
-    delete $heap->{wheel_client};
-
-}
-
 
 
 1;
