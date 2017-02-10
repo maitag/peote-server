@@ -162,7 +162,7 @@ sub client_handshake {
 			$policy .= '<allow-access-from domain="'.$config->{'flash_policy_domain'}.'" to-ports="'.$config->{'flash_policy_port'}.'" />';
 			$policy .= '</cross-domain-policy>';
 			$policy .= pack("b",0);
-			log_("[$heap->{log}] Client $heap->{peer_host}:$heap->{peer_port} gets flash policy\n",'ACCESS');
+			$logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} gets flash policy\n",'ACCESS');
 			exists ( $heap->{wheel_client} ) and $heap->{wheel_client}->put($policy);
 			$heap->{state} = 'connected';
 		}

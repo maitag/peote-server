@@ -7,7 +7,7 @@ network-coding more abstract and platform-independent with haxe.
 It is based on a simple Protocol called "joints" that did fast redirection of of Data
 between many clients (only <=2 Bytes overhead each tcp-packet).
 
-#todo: scheme picture hier
+(Todo: scheme picture hier)  
 
 
 
