@@ -1,28 +1,32 @@
 # peote-server
 perl tcp-server just with joint-protocol  
 
-This TCP IP Socket Server together with [PeoteNet](https://github.com/maitag/peote-net) API helps me in
-network-coding more abstract and platform-independent with haxe.  
+This TCP IP Socket Server together with [PeoteNet](https://github.com/maitag/peote-net) helps me  
+to do crossplatform networkcoding with haxe.  
 
 It is based on a simple Protocol called "joints" that did fast redirection of of Data
-between many clients (only <=2 Bytes overhead each tcp-packet).
+between many clients (only <=2 Bytes overhead each tcp-packet).  
 
 (Todo: scheme picture hier)  
 
+Up to 128 joints (channels) will be handled with max. 255 users per joint.  
 
 
-Up to 128 joints will be handled
-with max. 255 users per joint.
+## Perl 5 Environment
 
-use with care ;)  
+On Linux everything should run out of the box,  
+for Windows i recommend to use [strawberryperl](http://strawberryperl.com/).  
+
+### Perlmodule dependencies
+
+- [POE](http://search.cpan.org/~rcaputo/POE-1.367/lib/POE.pm) ( (http://poe.perl.org/) )
+- [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm) ([article](http://showmetheco.de/articles/2011/2/diving-into-html5-with-websockets-and-perl.html))
 
 
-
-
-###TODO:
+## TODO:
 - more tests and samples
 - damonizing for linux
-- hardening against flooding test
+- hardening against flooding
 - blacklisting via iptables
-- standalone for win32 users
+- standalone for windows users
 
