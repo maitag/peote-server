@@ -1,5 +1,5 @@
 # peote-server
-perl tcp-server just with joint-protocol  
+perl5 tcp-server just with joint-protocol  
 
 This TCP IP Socket Server together with [PeoteNet](https://github.com/maitag/peote-net) helps me  
 to do crossplatform networkcoding with haxe.  
@@ -19,8 +19,8 @@ for Windows i recommend to use [strawberryperl](http://strawberryperl.com/).
 
 ### Perlmodule dependencies
 
-- [POE](http://search.cpan.org/~rcaputo/POE-1.367/lib/POE.pm) ( (http://poe.perl.org/) )
-- [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm) ([article](http://showmetheco.de/articles/2011/2/diving-into-html5-with-websockets-and-perl.html))
+- [POE](http://search.cpan.org/~rcaputo/POE-1.367/lib/POE.pm) ( http://poe.perl.org/ )
+- [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm) - ( [article](http://showmetheco.de/articles/2011/2/diving-into-html5-with-websockets-and-perl.html) )
 
 
 ## TODO:
