@@ -26,7 +26,7 @@ my $logger = {};
 my $ipcount = {};    # enthaelt max. numbers of connections per ip
 
 
-my $joints = Peote::Joints->new($config, $logger);
+my $joints = {};
 
 
 ############################################################################# KONSTRUKTOR
@@ -37,6 +37,7 @@ sub new {
 
     my $self = bless {}, $class;
 
+    $joints = Peote::Joints->new($config, $logger);
     return $self;
 }
 
@@ -672,7 +673,7 @@ sub _deleteUser
 	if (defined($disconnect_list_IN))
 	{
 		foreach my $user_id_joint_nr (@{$disconnect_list_IN})
-		{
+		{	
 			my ($user_id_OWN, $joint_nr_OWN) = @{$user_id_joint_nr}; # TODO: optimieren und unten gleich $user_id_joint_nr->[0] usw
 											   # servercommand   #Disconnects                       # reason
 			_send_command_chunk( $user_id_OWN, pack("C1",0).pack("C1",2).pack("C1",$joint_nr_OWN).pack("C1",1)); # user benachrichtigen

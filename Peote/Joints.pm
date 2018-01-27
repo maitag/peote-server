@@ -91,7 +91,7 @@ sub getPortalList {
         return $message;
 }
 
-sub deleteUser { # TODO: alle disconnected zurueckgeben!
+sub deleteUser {
 	my ($self, $user_id) = @_;
 	
 	if (exists($users->{$user_id})) # nur wenn der user existiert
@@ -103,7 +103,7 @@ sub deleteUser { # TODO: alle disconnected zurueckgeben!
 		
 		foreach my $joint_nr_OWN ( keys %{ $users->{$user_id}->{ 'joints' } } ) #fuer jede joint_nr_OWN des owners
 		{
-			$disconnect_list_IN = deleteJoint($self, $user_id, $joint_nr_OWN); # liste aller user die zu einem joint dieses users connected sind
+			push @{$disconnect_list_IN}, @{deleteJoint($self, $user_id, $joint_nr_OWN)}; # liste aller user die zu einem joint dieses users connected sind
 		}
 		foreach my $joint_nr_IN ( keys %{ $users->{$user_id}->{ 'in_joints' } } ) #fuer jede joint_nr_IN des users diesen disconnecten
 		{
@@ -123,7 +123,7 @@ sub deleteUser { # TODO: alle disconnected zurueckgeben!
 	return(undef, undef); # FEHLER, user ex. nicht!!!
 }
 
-sub deleteJoint { # TODO: alle disconnected zurueckgeben!
+sub deleteJoint {
 	my ($self, $user_id, $joint_nr_OWN) = @_;
 	
 	my $joint_id = $users->{$user_id}->{ 'joints' }->{$joint_nr_OWN};
