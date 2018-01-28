@@ -9,12 +9,12 @@ between many clients (only <=2 Bytes overhead each tcp-packet).
 
 (Todo: scheme picture hier)  
 
-Up to 128 joints (channels) will be handled with max. 255 users per joint.  
+Up to 128 joints (open channels per user) will be handled with max. 255 users per joint.  
 
 
 ## Perl 5 Environment
 
-On Linux everything should run out of the box,  
+On Linux everything should run out of the box (`apt install perl5 libpoe-perl && cpan Protocol::WebSocket`),
 for Windows i recommend to use [strawberryperl](http://strawberryperl.com/).  
 
 ### Perlmodule dependencies
