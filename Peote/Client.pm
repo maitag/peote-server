@@ -208,7 +208,7 @@ sub client_handshake {
 ###################################################################################### client_input
 sub client_input {
     my ( $heap, $input ) = @_[ HEAP, ARG0 ];
-    $config->{'debug'} && print "\nCLIENT INPUT \n\n";
+    $config->{'debug'} && print "\nCLIENT INPUT ";
    
     _parse_client_input( $heap, $input );
 }
@@ -216,7 +216,7 @@ sub client_input {
 ###################################################################################### client_input_ws
 sub client_input_ws {
     my ( $heap, $input ) = @_[ HEAP, ARG0 ];
-    $config->{'debug'} && print "\nCLIENT INPUT \n\n";
+    $config->{'debug'} && print "\nCLIENT INPUT Webseocket ";
    
 	$heap->{ws_frame}->append($input);
 	while (my $message = $heap->{ws_frame}->next_bytes)
@@ -349,12 +349,15 @@ sub client_handle_flushed {
 sub _parse_client_input {
     my ( $heap, $input ) = @_;
 	
-    $input = $heap->{'input_left'} . $input;
-    $heap->{'input_left'} = "";   
-    my $user_id = $heap->{sid};
+	$input = $heap->{'input_left'} . $input;
+	$heap->{'input_left'} = "";   
+	my $user_id = $heap->{sid};
+	
+	$config->{'debug'} && print "[$user_id] ";
+	
     while (length($input) > 0)  # solange noch input vorhanden ist
     {   
-		$config->{'debug'} && print 'length($input):'.length($input)."\n";
+		#$config->{'debug'} && print 'length($input):'.length($input)."\n";
 		
 		if (defined($heap->{'command'})) # ========================================== COMMAND CHUNK ==========================================
 		{ 	
@@ -485,59 +488,58 @@ sub _parse_client_input {
 			
 		}
 		elsif ($heap->{'bytes_left'} == 0) # bei chunk-ende, also =================== neuer DATEN CHUNK ======================================
-        {
-		   # da neuer chunk kommt, gibts noch keine joint_nr und empfaenger 
-           $heap->{'joint_nr'} = undef;
-           $heap->{'$reciever_id'} = undef;
-    
-           # zuerst Chunk-Size laden
-           if(length($input) >= 2 )
-           { 
-              # Chunk-Size erstes Byte laden
-              my $size_1; my $size_2;
-              ($size_1, $input)=unpack("C1 a*", $input); # erstes Byte fuer Chunk-Size grabben
-              
-              if ($size_1 < 128)
-              {   # TODO: da IMMER die joint_nr mit im chunk ist, koennte bei if ($size_ ==1) noch ein spezialkommando kommen (evtl. ein "alive ping" ?)
-                  	# TODO: wenn die (size_1 == 1) ist, kann dies VORKOMMEN?
-					# evtl. nun special-case, also dann ist es eine ANTWORT
-					# auf ein COMMAND vom SERVER, z.b. wenn neuer joint eroeffnet wurde ???
+		{
+			my @chdata = unpack( 'C*', $input );print "- neuer chunk:@chdata\n";
 
-				  if ($size_1 == 0) # --> CONTROL COMMAND  ----------------------
-                  {    
-                      # in den COMMAND_MODE WECHSELN und abbrechen (die while-loop macht es ja eh dann nochmal ->solange input!!!)
-					  ($heap->{'command'}, $input) = unpack("C1 a*", $input); # ein Byte fuer COMMAND grabben 
-					  # TODO: hier schon abbrechen wenn kein gueltiges command (siehe oben beim command-auswerten hiterm letzten!!!
-                  }
-                  else 
-                  {
-                       $heap->{'bytes_left'} = $size_1; # -->  kleiner Chunk!
-					   $config->{'debug'} && print "DEBUG KLEINER CHUNK VOM CLIENT <----------- : chunksize=".$heap->{'bytes_left'}."\n";
-                  } 
+			# da neuer chunk kommt, gibts noch keine joint_nr und empfaenger 
+			$heap->{'joint_nr'} = undef;
+			$heap->{'$reciever_id'} = undef;
+
+			# zuerst Chunk-Size laden
+			if(length($input) >= 2 )
+			{ 
+				# Chunk-Size erstes Byte laden
+				my $size_1; my $size_2;
+				($size_1, $input)=unpack("C1 a*", $input); # erstes Byte fuer Chunk-Size grabben
+
+				if ($size_1 < 128)
+				{	# TODO: da mindestens die joint_nr im chunk ist,  kann bei ($size_ ==1 ) noch ein spezialkommando kommen
+
+					if ($size_1 == 0) # --> CONTROL COMMAND  ----------------------
+					{
+						# in den COMMAND_MODE WECHSELN und abbrechen (die while-loop macht es ja eh dann nochmal ->solange input!!!)
+						($heap->{'command'}, $input) = unpack("C1 a*", $input); # ein Byte fuer COMMAND grabben 
+						# TODO: hier schon abbrechen wenn kein gueltiges command (siehe oben )
+					}
+					else 
+					{
+						$heap->{'bytes_left'} = $size_1; # -->  kleiner Chunk!
+						$config->{'debug'} && print "KLEINER CHUNK <----------- : chunksize=$heap->{'bytes_left'} ";
+					}
               }
               else
               {   
                   ($size_2, $input) = unpack("C1 a*", $input); # noch ein Byte fuer Chunk-Size grabben
                   $heap->{'bytes_left'} = ($size_1 - 128) * 256 + $size_2;   # --> grosser Chunk!
-                  $config->{'debug'} && print "DEBUG GROSSER CHUNK VOM CLIENT <----------- : chunksize=".$heap->{'bytes_left'}."\n";
+                  $config->{'debug'} && print "GROSSER CHUNK <----------- : chunksize=$heap->{'bytes_left'} ";
               }
            }
            else
-           {  # es fehlt noch mehr um ueberhaupt erst loszulegen, also 
+           {  # es fehlt noch mehr, also 
               $heap->{'input_left'} = $input;
               $input = "";
            }
         }
         else # -------------- Daten Chunk-Size ist uebermittelt, hier nurnoch Daten auswerten und weiterleiten ------------
         {
-    
-    
+			my @chdata = unpack( 'C*', $input );print "\n--------------- mehr chunk-data:@chdata\n";
+			
             if(! defined( $heap->{'joint_nr'} ))  # noch keine joint_nr ermittelt
             {
-                if (length($input) > 0) # TODO: kann dieser check nicht entfallen (muss da nicht immer was sein wegen while-bedingung?)
+                if (length($input) > 0) # TODO: kann dieser check entfallen (while-bedingung?)
                 {  
 					($heap->{'joint_nr'}, $input)=unpack("C1 a*", $input); # grab joint_nr ----------
-                    $config->{'debug'} && print "joint_nr vom CLIENT <----: ".$heap->{'joint_nr'}."\n";
+                    $config->{'debug'} && print " <---- joint_nr:$heap->{'joint_nr'}\n";
 					
 					$heap->{'bytes_left'}--;
                      
@@ -547,30 +549,34 @@ sub _parse_client_input {
 						my $joint_nr_OWN;
 						
 						($heap->{'$reciever_id'}, $joint_nr_OWN, $user_nr_IN) = $joints->toJoint($user_id, $heap->{'joint_nr'});
-						$config->{'debug'} && print "joint_nr GESENDET (joint_nr_OWN)---->: ".$joint_nr_OWN."\n";
-						$config->{'debug'} && print "user_nr GESENDET (user_nr_IN  )---->: ".$user_nr_IN."\n";
-						
 						if ($joint_nr_OWN > -1) # kein fehler: nur wenn es zu Dieser joint_nr moegliche in_joints gibt
 						{
+							$config->{'debug'} && print " ------> joint_nr(OWN): $joint_nr_OWN --> user_nr(IN): $user_nr_IN [$user_id -> $heap->{'$reciever_id'}]";
+							
 							$heap->{'first'} =  pack("C1", $joint_nr_OWN + 128 ) . pack("C1", $user_nr_IN);
-
-							($heap->{'bytes_left'}, $input) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'},  $input, $heap->{'$reciever_id'});
-							$config->{'debug'} && print "[$user_id]RecieverID:".$heap->{'$reciever_id'}."\n";
+							
+							if (length($input)>0) 
+							{
+								($heap->{'bytes_left'}, $input) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'}, $input, $heap->{'$reciever_id'});
+							}
 						}
 						else
 						{
+							# print "Error: TODO -> line:". __LINE__ . "\n";die;
 							# TODO: bei Fehler hier evtl. client disconnecten (moegliche DOS-Attack)!
 							# aber: dann muss der client auch eine msg bekommen und wissen das joint weg ist
 						}
 					}
                  
-                }
+                } else {print "Error: TODO -> line:". __LINE__ . "\n";die;}
             }
             else # joint_nr wurde schon ermittelt
             {
                if (! defined( $heap->{'$reciever_id'} ))  # wurde schon der empfaenger ermittelt
                {    
 					#TODO: evtl. Fehlerquelle: kann $input == "" sein?
+					if (length($input)==0) {print "Error: TODO -> line:". __LINE__ . "\n";die;}
+					
 					my $reciever_nr;
 					my $joint_nr_IN;
 					
@@ -578,18 +584,21 @@ sub _parse_client_input {
 					$heap->{'bytes_left'}--;
 
 					($heap->{'$reciever_id'}, $joint_nr_IN) = $joints->fromJoint($user_id, $heap->{'joint_nr'} - 128, $reciever_nr);
-					$config->{'debug'} && print "joint_nr GESENDET (joint_nr_IN)---->: ".$joint_nr_IN."\n";
 					
 					if ($joint_nr_IN > -1) # kein fehler: nur wenn es zu Dieser joint_nr moegliche users_in
 					{    
+						$config->{'debug'} && print " ----> joint_nr(IN):$joint_nr_IN [$user_id -> $heap->{'$reciever_id'}]";
+						
 						$heap->{'first'} = pack("C1", $joint_nr_IN);
 						
-						( $heap->{'bytes_left'} , $input ) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'} ,  $input, $heap->{'$reciever_id'});
-						#print "[$user_id]RecieverID:".$heap->{'$reciever_id'}."\n";
-						$config->{'debug'} && print "gesendet: bytes_left=".$heap->{'bytes_left'}.'  length($input):'.length($input)."\n";
+						if (length($input)>0)
+						{
+							( $heap->{'bytes_left'} , $input ) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'} ,  $input, $heap->{'$reciever_id'});
+						}
 					}
 					else
 					{
+						print "Error: TODO -> line:". __LINE__ . "\n";die;
 						# TODO: bei Fehler hier evtl. client disconnecten (moegliche DOS-Attack)!
 						# aber: dann muss der client auch eine msg bekommen und wissen das user weg ist
 					}
@@ -597,10 +606,9 @@ sub _parse_client_input {
                }
                else
                {
-                  # wenn joint_nr und reciever_id schon da sind, dann kann es nur ein Rest sein vom vorherigen MAle 
+                  # wenn joint_nr und reciever_id schon da sind, dann kann es nur ein Rest vom vorherigen Mal sein  
+				  $config->{'debug'} && print " ---------> REST: bytes_left=$heap->{'bytes_left'}  length=".length($input);
                   ( $heap->{'bytes_left'} , $input ) = _send_anz_bytes( $heap->{'bytes_left'}, $heap->{'first'} , $input, $heap->{'$reciever_id'});
-                  #print "[$user_id]RecieverID:".$heap->{'$reciever_id'}."\n";
-				  $config->{'debug'} && print "REST gesendet: bytes_left=".$heap->{'bytes_left'}.'  length($input):'.length($input)."\n";
                }
             }
     
@@ -617,7 +625,7 @@ sub _parse_client_input {
 sub _send_anz_bytes
 {
     my ( $bytes_left, $first, $input, $reciever_id ) = @_;
-    my $input_send;
+    my $input_send = "";
     if ($bytes_left >= length($input))
     {       # gesammten $input abziehen
             $input_send = $input;
@@ -626,10 +634,15 @@ sub _send_anz_bytes
     }
     else
     {
-		($input_send, $input) = unpack("a".$bytes_left." a*", $input); # chunk vom input abziehen TODO->FEHLER===???
+		#print "bytes_left:".$bytes_left."\n";
+		#print "input:\n".$input."<\n";
+		#($input_send, $input) = unpack("a".$bytes_left." a*", $input); # chunk vom input abziehen TODO->FEHLER===???
+		( $input_send, $input ) = ( substr($input,0,$bytes_left), substr($input,$bytes_left) );
+		#print "input_send:\n".$input_send."\n";
+		#print "input:\n".$input."<\n------------------------------------\n";
         $bytes_left = 0;
     }
-    
+    $config->{'debug'} && print ">$input_send<";
 	_send_chunk($reciever_id, $first.$input_send);
      
     return($bytes_left, $input);
@@ -643,14 +656,15 @@ sub _send_chunk
 	if ($chunk_size<128)
 	{
 		$poe_kernel->post($reciever_id => client_send => pack("C1", $chunk_size).$input );
-		$config->{'debug'} && print "DEBUG SEND TO CLIENT KLEINER CHUNK -----------> chunksize=".$chunk_size."\n";
+		$config->{'debug'} && print " -----------> KLEINER CHUNK -----------> chunksize=".$chunk_size."\n";
 	}
 	else
 	{	# TODO: Kann es vorkommen das chunksize mal groesser als 2 Byte wird? (eigentlich nicht, da ja auch nur so eingelesen wird)
 		if ($chunk_size > 32767) {$config->{'debug'} && print "ACHTUNG, chunksize zu gross (zeile 500) chunksize=".$chunk_size; die; }
-		$config->{'debug'} && print "DEBUG SEND TO CLIENT GROSSER CHUNK -----------> chunksize=".$chunk_size."\n";
+		$config->{'debug'} && print " -----------> GROSSER CHUNK -----------> chunksize=".$chunk_size."\n";
 		$poe_kernel->post($reciever_id => client_send => pack("C1", ($chunk_size >> 8) + 128 ).pack("C1", $chunk_size & 255).$input );
 	}
+	#print " ------------- gesendet -------------\n".$input."<\n---------------------------\n";
 }
 ######################################################################################
 sub _send_command_chunk
