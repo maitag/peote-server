@@ -357,8 +357,6 @@ sub _parse_client_input {
 	
     while (length($input) > 0)  # solange noch input vorhanden ist
     {   
-		#$config->{'debug'} && print 'length($input):'.length($input)."\n";
-		
 		if (defined($heap->{'command'})) # ========================================== COMMAND CHUNK ==========================================
 		{ 	
 		# TODO: evtl. commands ohne ANTWORT + CHUNK-Size 
@@ -489,7 +487,7 @@ sub _parse_client_input {
 		}
 		elsif ($heap->{'bytes_left'} == 0) # bei chunk-ende, also =================== neuer DATEN CHUNK ======================================
 		{
-			my @chdata = unpack( 'C*', $input );print "- neuer chunk:@chdata\n";
+			#my @chdata = unpack( 'C*', $input );print "- neuer chunk:@chdata\n";
 
 			# da neuer chunk kommt, gibts noch keine joint_nr und empfaenger 
 			$heap->{'joint_nr'} = undef;
@@ -532,7 +530,7 @@ sub _parse_client_input {
         }
         else # -------------- Daten Chunk-Size ist uebermittelt, hier nurnoch Daten auswerten und weiterleiten ------------
         {
-			my @chdata = unpack( 'C*', $input );print "\n--------------- mehr chunk-data:@chdata\n";
+			#my @chdata = unpack( 'C*', $input );print "\n--------------- mehr chunk-data:@chdata\n";
 			
             if(! defined( $heap->{'joint_nr'} ))  # noch keine joint_nr ermittelt
             {
@@ -598,7 +596,7 @@ sub _parse_client_input {
 					}
 					else
 					{
-						print "Error: TODO -> line:". __LINE__ . "\n";die;
+						$config->{'debug'} && print "joint was disconnected, can't send more messages:\n";
 						# TODO: bei Fehler hier evtl. client disconnecten (moegliche DOS-Attack)!
 						# aber: dann muss der client auch eine msg bekommen und wissen das user weg ist
 					}
@@ -634,12 +632,8 @@ sub _send_anz_bytes
     }
     else
     {
-		#print "bytes_left:".$bytes_left."\n";
-		#print "input:\n".$input."<\n";
-		#($input_send, $input) = unpack("a".$bytes_left." a*", $input); # chunk vom input abziehen TODO->FEHLER===???
-		( $input_send, $input ) = ( substr($input,0,$bytes_left), substr($input,$bytes_left) );
-		#print "input_send:\n".$input_send."\n";
-		#print "input:\n".$input."<\n------------------------------------\n";
+		($input_send, $input) = unpack("a".$bytes_left." a*", $input); # chunk vom input abziehen
+		#( $input_send, $input ) = ( substr($input,0,$bytes_left), substr($input,$bytes_left) );
         $bytes_left = 0;
     }
     $config->{'debug'} && print ">$input_send<";
