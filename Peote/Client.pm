@@ -353,11 +353,11 @@ sub _parse_client_input {
 	my ( $heap, $input ) = @_;
 	
 	$input = $heap->{'input_left'} . $input;
-	$heap->{'input_left'} = "";   
+	$heap->{'input_left'} = "";
 	my $user_id = $heap->{sid};
 	
 	$config->{'debug'} && print "[$user_id] ";
-	
+
 	while (length($input) > 0)  # solange noch input vorhanden ist
 	{
 		if (defined($heap->{'command'})) # ========================================== COMMAND CHUNK ==========================================
@@ -469,7 +469,7 @@ sub _parse_client_input {
 						}
 					}
 					else # kein bekanntes command!!! FEHLER oder DOS-ATTACK -----------------------
-					{	$logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} COMMAND FAILURE: $input\n");
+					{	$logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} COMMAND FAILURE\n");
 						delete $heap->{wheel_client};
 						$input = "";
 					}
@@ -515,19 +515,19 @@ sub _parse_client_input {
 						$heap->{'bytes_left'} = $size_1; # -->  kleiner Chunk!
 						$config->{'debug'} && print "KLEINER CHUNK <----------- : chunksize=$heap->{'bytes_left'} ";
 					}
+				}
+				else
+				{   
+					($size_2, $input) = unpack("C1 a*", $input); # noch ein Byte fuer Chunk-Size grabben
+					$heap->{'bytes_left'} = ($size_1 - 128) * 256 + $size_2;   # --> grosser Chunk!
+					$config->{'debug'} && print "GROSSER CHUNK <----------- : chunksize=$heap->{'bytes_left'} ";
+				}
 			}
 			else
-			{   
-				($size_2, $input) = unpack("C1 a*", $input); # noch ein Byte fuer Chunk-Size grabben
-				$heap->{'bytes_left'} = ($size_1 - 128) * 256 + $size_2;   # --> grosser Chunk!
-				$config->{'debug'} && print "GROSSER CHUNK <----------- : chunksize=$heap->{'bytes_left'} ";
+			{  # es fehlt noch mehr, also 
+				$heap->{'input_left'} = $input;
+				$input = "";
 			}
-		}
-		else
-		{  # es fehlt noch mehr, also 
-			$heap->{'input_left'} = $input;
-			$input = "";
-		}
 		}
 		else # -------------- Daten Chunk-Size ist uebermittelt, hier nurnoch Daten auswerten und weiterleiten ------------
 		{
