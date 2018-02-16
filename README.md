@@ -20,13 +20,11 @@ for Windows i recommend to use [strawberryperl](http://strawberryperl.com/).
 ### Perlmodule dependencies
 
 - [POE](http://search.cpan.org/~rcaputo/POE-1.367/lib/POE.pm) - ( http://poe.perl.org/ )
-- [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm) - ( [article](http://showmetheco.de/articles/2011/2/diving-into-html5-with-websockets-and-perl.html) )
+- [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm)  
 
 
 ## TODO:
-- more tests and samples
-- damonizing for linux
-- hardening against flooding
-- blacklisting via iptables
-- standalone for windows users
-
+- more test-clients & debugging
+- damonizing (linux)
+- hardening (iptables)
+- standalone packages (par)
