@@ -22,6 +22,10 @@ for Windows i recommend to use [strawberryperl](http://strawberryperl.com/).
 - [POE](http://search.cpan.org/~rcaputo/POE-1.367/lib/POE.pm) - ( http://poe.perl.org/ )
 - [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm)  
 
+## Start the Server
+
+- configure ports etc. inside `peote.conf`
+- run the server `perl -I. peote.pl`
 
 ## TODO:
 - more test-clients & debugging
