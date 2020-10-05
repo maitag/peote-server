@@ -26,7 +26,7 @@ use Peote::MaiLogger;
 
 
 
-my $config = MaiConfig::read_config_('peote.conf');
+my $config = MaiConfig::read_config_('peote-server.conf');
 my $logger = MaiLogger->new($config);
 
 my $peote = Peote::Server->new($config, $logger);

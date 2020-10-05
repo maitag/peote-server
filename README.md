@@ -18,14 +18,13 @@ On Linux everything should run out of the box (`apt install perl5 libpoe-perl &&
 for Windows i recommend to use [strawberryperl](http://strawberryperl.com/).  
 
 ### Perlmodule dependencies
-
 - [POE](http://search.cpan.org/~rcaputo/POE-1.367/lib/POE.pm) - ( http://poe.perl.org/ )
 - [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm)  
 
-## Start the Server
+### Start the Server
+- configure ports, max connections per ip and logging inside `peote-server.conf`
+- run the server `perl -I. peote-server.pl`
 
-- configure ports etc. inside `peote.conf`
-- run the server `perl -I. peote.pl`
 
 ## TODO:
 - more test-clients & debugging
