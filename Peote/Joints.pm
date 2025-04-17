@@ -12,16 +12,16 @@ our $VERSION = '0.1';
 my $config = {};
 my $logger = {};
 my $users = {    # Session_ids und Anzahl der Portale pro eingeloggtem Clienten
-                 #               'in_joints'=>{ joint_nr_IN => [user_id_OWN, joint_nr_OWN, user_nr_IN] }  'joints' => {joint_nr_OWN => ...}
-                 #  'user1' => { 'in_joints'=>{ 0 => ['user6',0,0]                } ,              'joints' => { 0 => 'Karls Hof', 1=>'neue Welt' }  },
-                 #  'user6' => { 'in_joints'=>{ 0 => ['user1',0,0], 1=>['user1',1,0]} ,              'joints' => { 0 => 'mehr Raum'                 }  }
+                 #               'in_joints'=>{ joint_nr_IN => [user_id_OWN, joint_nr_OWN, user_nr_IN]                   },  'joints' => {joint_nr_OWN => ...}
+                 #  'user1' => { 'in_joints'=>{ 0           => ['user6'    , 0           , 0         ]                   },  'joints' => { 0           => 'Karls Hof', 1=>'neue Welt' }  },
+                 #  'user6' => { 'in_joints'=>{ 0           => ['user1'    , 0           , 0         ], 1=>['user1',1,0] },  'joints' => { 0           => 'mehr Raum'                 }  }
             };
 my $joints = {  # Joint-name bzw -key  und ob sichtbar ist, welcher user server ist und welche clients verbunden sind
                 
-				#                                             'users_in'=>{ user_nr_IN => [user_id_IN, joint_nr_IN] }
-				#  'Karls Hof' => {'nr'=>0, 'owner'=>'user1', 'users_in'=>{ 0 => ['user6', 0 } },
-                #  'neue Welt' => {'nr'=>1, 'owner'=>'user1', 'users_in'=>{ 0 => ['user6', 1 } },
-                #  'mehr Raum' => {'nr'=>0, 'owner'=>'user6', 'users_in'=>{ 0 => ['user1', 0 } },
+				#                                             'users_in'=>{ user_nr_IN => [user_id_IN, joint_nr_IN], ... }
+				#  'Karls Hof' => {'nr'=>0, 'owner'=>'user1', 'users_in'=>{ 0          => ['user6'   , 0          ], ... } },
+                #  'neue Welt' => {'nr'=>1, 'owner'=>'user1', 'users_in'=>{ 0          => ['user6'   , 1          ], ... } },
+                #  'mehr Raum' => {'nr'=>0, 'owner'=>'user6', 'users_in'=>{ 0          => ['user1'   , 0          ], ... } },
              };
 
 sub new {
@@ -76,6 +76,22 @@ sub fromJoint {
 		return (-2,-2); #user ist KEIN OWNER von diesem JOINT
 	}
 }
+
+# gets all reciever ids to send to more then one
+sub fromJointBroadcast {
+	my ($self, $user_id, $joint_nr) = @_;
+	
+	if ( exists($users->{$user_id}->{'joints'}->{$joint_nr}) ) # wenn der owner so eine joint_nr hat
+	{	
+		return $joints->{ $users->{$user_id}->{'joints'}->{$joint_nr}  }->{'users_in'};  # liefert hash aller [user_id_IN, joint_nr_IN] arrays		
+	}
+	else
+	{
+		return undef; #user ist KEIN OWNER von diesem JOINT
+	}
+}
+
+
 
 sub getPortalList {
 	my $message = "[";

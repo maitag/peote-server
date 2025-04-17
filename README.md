@@ -13,17 +13,22 @@ Up to 128 joints (open channels per user) will be handled with max. 255 users pe
 
 
 ## Perl 5 Environment
-
 On Linux everything should run out of the box (`apt install perl5 libpoe-perl && cpan Protocol::WebSocket`),
 for Windows i recommend to use [strawberryperl](http://strawberryperl.com/).  
+
 
 ### Perlmodule dependencies
 - [POE](http://search.cpan.org/~rcaputo/POE-1.367/lib/POE.pm) - ( http://poe.perl.org/ )
 - [Protocol::WebSocket](http://search.cpan.org/~vti/Protocol-WebSocket/lib/Protocol/WebSocket.pm)  
 
+
 ### Start the Server
-- configure ports, max connections per ip and logging inside `peote-server.conf`
-- run the server `perl -I. peote-server.pl`
+Inside the `peote-server.conf` file you can configure ports, max connections per ip, logging and more.
+To run the server start it by: `perl -I. peote-server.pl`  
+ 
+ 
+## To run it by Docker
+Please look at ohmruns [`lepew`](https://github.com/ohmrun/lepew) for a configured container-image.
 
 
 ## TODO:

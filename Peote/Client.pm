@@ -62,14 +62,14 @@ sub client_create {
 			inline_states => {
 				_start => \&client_start,
 				_stop  => \&client_stop,
-				client_handshake           => \&client_handshake,        # am anfang policy checken
+				client_handshake           => \&client_handshake,           # check protocol (websocket or raw)
 				#client_input_cmd           => \&client_input_cmd,           # auf ein gueltiges commando checken
 				client_input               => \&client_input,               # ES KOMMT WAS AN
 				client_input_ws            => \&client_input_ws,            # ES KOMMT WAS AN (via websockets)
 				client_error               => \&client_error,               # Error on client socket.
 				client_send                => \&client_send,                # sendet daten zum client
 				client_check_login_timeout => \&client_check_login_timeout, # delay nach starten der verbindung
-				client_send_alife_message  => \&client_send_alife_message,   # nach delay send alife command
+				client_send_alife_message  => \&client_send_alife_message,  # send delayed alife command
 	
 				client_handle_flushed => \&client_handle_flushed
 	
@@ -98,7 +98,9 @@ sub client_start {
 	$heap->{'input_left'} = ""; # hier wird immer der REST gespeichert falls nicht alles in einem STUECK kam
 	$heap->{'bytes_left'} = 0; # wieviel Bytes noch kommen muessen bis neue joint_nr/control-byte kommt
 	$heap->{'joint_nr'} = undef;
-	$heap->{'reciever_id'} = undef; 
+	$heap->{'reciever_id'} = undef;
+	$heap->{'exclude_reciever_nr'} = undef;
+	$heap->{'broadcast'} = undef;	
 	$heap->{'first'} = "";
 	$heap->{'command'} = undef;
 	$heap->{'command_nr'} = undef;
@@ -130,13 +132,11 @@ sub client_handshake {
 	if ( $heap->{state} eq 'handshake' )
 	{
 		# check first incomming byte to see whats may going on ;)
-		if ($input =~ /^</)
+		if ($input =~ /^G/)
 		{
-			$config->{debug} && print "waiting for full flash policy request\n";
-			$heap->{state} = 'handshake-flash';
-		}
-		elsif ($input =~ /^G/)
-		{
+			# TODO: check more magicbytes of header
+			#my $bytesCSL = ''; foreach my $c (unpack( 'C*', $input )) { $bytesCSL .= sprintf( "%lu", $c )." "; }
+			#print "protocol header >$bytesCSL\n";
 			$config->{debug} && print "waiting for full websocket handshake\n";
 			$heap->{ws_handshake} = Protocol::WebSocket::Handshake::Server->new;
 			$heap->{ws_frame}     = Protocol::WebSocket::Frame->new;
@@ -153,23 +153,7 @@ sub client_handshake {
 	
 	##########################################
 	
-	if ( $heap->{state} eq 'handshake-flash' )
-	{
-		if ($heap->{input_left} =~ s/^(<policy-file-request\/>\0)//  )
-		{
-			my $policy = '<?xml version="1.0"?>';
-			$policy .= '<!DOCTYPE cross-domain-policy SYSTEM "/xml/dtds/cross-domain-policy.dtd">';
-			$policy .= '<cross-domain-policy>';
-			$policy .= '<site-control permitted-cross-domain-policies="master-only"/>';
-			$policy .= '<allow-access-from domain="'.$config->{'flash_policy_domain'}.'" to-ports="'.$config->{'flash_policy_port'}.'" />';
-			$policy .= '</cross-domain-policy>';
-			$policy .= pack("b",0);
-			$logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} gets flash policy\n",'ACCESS');
-			exists ( $heap->{wheel_client} ) and $heap->{wheel_client}->put($policy);
-			$heap->{state} = 'connected';
-		}
-	}
-	elsif ( $heap->{state} eq 'handshake-websocket' )
+	if ( $heap->{state} eq 'handshake-websocket' )
 	{
 		$heap->{ws_handshake}->parse($heap->{input_left});
 		$config->{debug} && print "pending after parse out for websocket: '".$heap->{input_left}."'\n";
@@ -468,6 +452,12 @@ sub _parse_client_input {
 						{	# TODO: bei undef FEHLERBEHANDLUNG (joint konnte nicht geloescht werden)
 						}
 					}
+					#elsif ($heap->{'command'} == 4) # DELETE USER FROM JOINT ------------------------------
+					#{
+					#	my $joint_nr_OWN;
+					#	($joint_nr_OWN, $input) = unpack("C1 a*", $input); # joint_nr vom input abziehen
+					#	TODO: # user_nr vom input abziehen
+					#}
 					else # kein bekanntes command!!! FEHLER oder DOS-ATTACK -----------------------
 					{	$logger->log("[$heap->{sid}] Client $heap->{client_addr}:$heap->{client_port} COMMAND FAILURE\n");
 						delete $heap->{wheel_client};
@@ -492,8 +482,8 @@ sub _parse_client_input {
 
 			# da neuer chunk kommt, gibts noch keine joint_nr und empfaenger 
 			$heap->{'joint_nr'} = undef;
-			$heap->{'$reciever_id'} = undef;
-
+			$heap->{'reciever_id'} = undef;
+			
 			# zuerst Chunk-Size laden
 			if(length($input) >= 2 )
 			{ 
@@ -509,6 +499,12 @@ sub _parse_client_input {
 						# in den COMMAND_MODE WECHSELN und abbrechen (die while-loop macht es ja eh dann nochmal ->solange input!!!)
 						($heap->{'command'}, $input) = unpack("C1 a*", $input); # ein Byte fuer COMMAND grabben 
 						# TODO: hier schon abbrechen wenn kein gueltiges command (siehe oben )
+					}
+					elsif ($size_1 == 1) #  --> BROADCAST ----------------------
+					{
+						($heap->{'broadcast'}, $input) = unpack("C1 a*", $input); # ein Byte fuer Broadcast-Mode grabben
+						# TODO: hier schon abbrechen wenn kein gueltiger broadcast-mode
+						# ODER vorher schon ein broadcast-command command kam!
 					}
 					else 
 					{
@@ -542,21 +538,23 @@ sub _parse_client_input {
 					
 					$heap->{'bytes_left'}--;
 					
-					if ( $heap->{'joint_nr'} < 128 )
+					if ( $heap->{'joint_nr'} < 128 ) #### wenn ein client sended dann $heap->{'reciever_id'} auf den joint-owner setzen !
 					{
+						# TODO: if (defined( $heap->{'broadcast'} )) { ERROR, da nur der joint owner broadcasten darf !!! -> client disconnecten! }
+						
 						my $user_nr_IN;
 						my $joint_nr_OWN;
 						
-						($heap->{'$reciever_id'}, $joint_nr_OWN, $user_nr_IN) = $joints->toJoint($user_id, $heap->{'joint_nr'});
+						($heap->{'reciever_id'}, $joint_nr_OWN, $user_nr_IN) = $joints->toJoint($user_id, $heap->{'joint_nr'});
 						if ($joint_nr_OWN > -1) # kein fehler: nur wenn es zu Dieser joint_nr moegliche in_joints gibt
 						{
-							$config->{'debug'} && print " ------> joint_nr(OWN): $joint_nr_OWN --> user_nr(IN): $user_nr_IN [$user_id -> $heap->{'$reciever_id'}]";
+							$config->{'debug'} && print " ------> joint_nr(OWN): $joint_nr_OWN --> user_nr(IN): $user_nr_IN [$user_id -> $heap->{'reciever_id'}]";
 							
 							$heap->{'first'} =  pack("C1", $joint_nr_OWN + 128 ) . pack("C1", $user_nr_IN);
 							
 							if (length($input)>0) 
 							{
-								($heap->{'bytes_left'}, $input) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'}, $input, $heap->{'$reciever_id'});
+								($heap->{'bytes_left'}, $input) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'}, $input, $heap->{'reciever_id'});
 							}
 						}
 						else
@@ -570,42 +568,91 @@ sub _parse_client_input {
 			}
 			else # joint_nr wurde schon ermittelt
 			{
-				if (! defined( $heap->{'$reciever_id'} ))  # wurde schon der empfaenger ermittelt
-				{
-					#TODO: evtl. Fehlerquelle: kann $input == "" sein?
-					if (length($input)==0) {print "Error: TODO -> line:". __LINE__ . "\n";die;}
-					
-					my $reciever_nr;
-					my $joint_nr_IN;
-					
-					($reciever_nr, $input) = unpack("C1 a*", $input); #  grab $reciever_nr -----------
-					$heap->{'bytes_left'}--;
-
-					($heap->{'$reciever_id'}, $joint_nr_IN) = $joints->fromJoint($user_id, $heap->{'joint_nr'} - 128, $reciever_nr);
-					
-					if ($joint_nr_IN > -1) # kein fehler: nur wenn es zu Dieser joint_nr moegliche users_in
+				if (! defined( $heap->{'broadcast'} )) # --------------- NORMAL MODE ---------------
+				{	
+					if (! defined( $heap->{'reciever_id'} ))  # wurde schon der empfaenger ermittelt, ansonsten sended der joint-owner die reciever_id
 					{
-						$config->{'debug'} && print " ----> joint_nr(IN):$joint_nr_IN [$user_id -> $heap->{'$reciever_id'}]";
+						#TODO: evtl. Fehlerquelle: kann $input == "" sein?
+						if (length($input)==0) {print "Error: TODO -> line:". __LINE__ . "\n";die;}
 						
-						$heap->{'first'} = pack("C1", $joint_nr_IN);
+						my $reciever_nr;
+						my $joint_nr_IN;
 						
-						if (length($input)>0)
+						($reciever_nr, $input) = unpack("C1 a*", $input); #  grab $reciever_nr -----------
+						$heap->{'bytes_left'}--;
+
+						($heap->{'reciever_id'}, $joint_nr_IN) = $joints->fromJoint($user_id, $heap->{'joint_nr'} - 128, $reciever_nr);
+						
+						if ($joint_nr_IN > -1) # kein fehler: nur wenn es zu Dieser joint_nr moegliche users_in
 						{
-							( $heap->{'bytes_left'} , $input ) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'} ,  $input, $heap->{'$reciever_id'});
+							$config->{'debug'} && print " ----> joint_nr(IN):$joint_nr_IN [$user_id -> $heap->{'reciever_id'}]";
+							
+							$heap->{'first'} = pack("C1", $joint_nr_IN);
+							
+							if (length($input)>0)
+							{
+								( $heap->{'bytes_left'} , $input ) = _send_anz_bytes( $heap->{'bytes_left'} , $heap->{'first'} ,  $input, $heap->{'reciever_id'});
+							}
+						}
+						else
+						{
+							$config->{'debug'} && print "joint was disconnected, can't send more messages:\n";
+							# TODO: bei Fehler hier evtl. client disconnecten (moegliche DOS-Attack)!
+							# aber: dann muss der client auch eine msg bekommen und wissen das user weg ist
 						}
 					}
 					else
 					{
-						$config->{'debug'} && print "joint was disconnected, can't send more messages:\n";
-						# TODO: bei Fehler hier evtl. client disconnecten (moegliche DOS-Attack)!
-						# aber: dann muss der client auch eine msg bekommen und wissen das user weg ist
+						# wenn joint_nr und reciever_id schon da sind, dann kann es nur ein Rest vom vorherigen Mal sein  
+						$config->{'debug'} && print " ---------> REST: bytes_left=$heap->{'bytes_left'}  length=".length($input);
+						( $heap->{'bytes_left'} , $input ) = _send_anz_bytes( $heap->{'bytes_left'}, $heap->{'first'} , $input, $heap->{'reciever_id'});
 					}
 				}
-				else
+				else # --------------- BROADCAST MODE ---------------
 				{
-					# wenn joint_nr und reciever_id schon da sind, dann kann es nur ein Rest vom vorherigen Mal sein  
-					$config->{'debug'} && print " ---------> REST: bytes_left=$heap->{'bytes_left'}  length=".length($input);
-					( $heap->{'bytes_left'} , $input ) = _send_anz_bytes( $heap->{'bytes_left'}, $heap->{'first'} , $input, $heap->{'$reciever_id'});
+					if (! defined( $heap->{'reciever_id'} ))  # wurde schon der empfaenger ermittelt, ansonsten sended der joint-owner die reciever_id
+					{
+						#TODO: evtl. Fehlerquelle: kann $input == "" sein?
+						if (length($input)==0) {print "Error: TODO -> line:". __LINE__ . "\n";die;}
+												
+						if ($heap->{'broadcast'} == 0) {
+							($heap->{'exclude_reciever_nr'}, $input) = unpack("C1 a*", $input); #  grab $exclude_reciever_nr 
+							$heap->{'bytes_left'}--;
+						}
+						else {
+							$heap->{'exclude_reciever_nr'} = undef;
+						}
+						
+						$heap->{'reciever_id'} = $joints->fromJointBroadcast($user_id, $heap->{'joint_nr'} - 128);
+						
+						#print "-------BROADCAST-----reciever_nr: $heap->{'reciever_id'} -----\n";
+						#while(my($k, $v) = each %{$heap->{'reciever_id'}}) {
+						#	print "reciever_nr $k : reciever_id ".$v->[0].", joint_nr_IN:".$v->[1]."\n";
+						#}
+						#print "--------------------\n";
+						
+						if (defined( $heap->{'reciever_id'})) # kein fehler: nur wenn es ein eigener joint ist
+						{
+							if (length($input)>0)
+							{
+								( $heap->{'bytes_left'} , $input ) = _broadcast_anz_bytes( $heap->{'bytes_left'}, $input, $user_id, $heap->{'reciever_id'}, $heap->{'exclude_reciever_nr'});
+								if ($heap->{'bytes_left'} == 0) { $heap->{'broadcast'} = undef; }
+							}
+						}
+						else  # joint ist nicht mehr da
+						{	#print "PROBLEM ????????? \n";
+							$heap->{'broadcast'} = undef;
+							$config->{'debug'} && print "joint was disconnected, can't send more messages:\n";
+							# TODO: bei Fehler hier evtl. client disconnecten (moegliche DOS-Attack)!
+						}
+					}
+					else
+					{
+						# wenn joint_nr und reciever_id schon da sind, dann kann es nur ein Rest vom vorherigen Mal sein  
+						$config->{'debug'} && print " ---------> REST: bytes_left=$heap->{'bytes_left'}  length=".length($input);
+						( $heap->{'bytes_left'} , $input ) = _broadcast_anz_bytes( $heap->{'bytes_left'}, $input, $user_id, $heap->{'reciever_id'}, $heap->{'exclude_reciever_nr'});
+						if ($heap->{'bytes_left'} == 0) { $heap->{'broadcast'} = undef; }
+					}
 				}
 			}
 	
@@ -634,6 +681,48 @@ sub _send_anz_bytes
 	}
 	$config->{'debug'} && print ">$input_send<";
 	_send_chunk($reciever_id, $first.$input_send);
+	
+	return($bytes_left, $input);
+}
+######################################################################################
+sub _broadcast_anz_bytes
+{
+	my ( $bytes_left, $input, $user_id, $reciever_ids, $exclude_reciever_nr ) = @_;
+	
+	my $input_send = "";
+	if ($bytes_left >= length($input))
+	{	# gesammten $input abziehen
+		$input_send = $input;
+		$bytes_left -= length($input_send);
+		$input = '';
+	}
+	else
+	{
+		($input_send, $input) = unpack("a".$bytes_left." a*", $input); # chunk vom input abziehen
+		#( $input_send, $input ) = ( substr($input,0,$bytes_left), substr($input,$bytes_left) );
+		$bytes_left = 0;
+	}
+	
+	if (defined($exclude_reciever_nr)) {
+		# broadcast to all users out of the excluded
+		print "broadcast to all users out of the excluded ".$exclude_reciever_nr."\n";
+		while(my($k, $v) = each %{$reciever_ids}) {
+			if ($exclude_reciever_nr != $k) {
+				$config->{'debug'} && print " ----> joint_nr(IN):$v->[1] [$user_id -> $v->[0]]";
+				$config->{'debug'} && print ">$input_send<";
+				_send_chunk($v->[0], pack("C1", $v->[1]).$input_send);
+			}
+		}
+	}
+	else {
+		# broadcast to all users
+		print "broadcast to all users "."\n";
+		while(my($k, $v) = each %{$reciever_ids}) {
+			$config->{'debug'} && print " ----> joint_nr(IN):$v->[1] [$user_id -> $v->[0]]";
+			$config->{'debug'} && print ">$input_send<";
+			_send_chunk($v->[0], pack("C1", $v->[1]).$input_send);
+		}
+	}
 	
 	return($bytes_left, $input);
 }

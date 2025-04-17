@@ -18,9 +18,6 @@ our $config = {
 	'forward_https_address'=>'localhost',
 	'forward_https_port'=>443,
 
-	'flash_policy_domain'=>'localhost',
-	'flash_policy_port'=>80,
-
 	'max_connections_per_ip'=>13,
 
 	'compress_min_bytes'=>50,
@@ -45,8 +42,6 @@ our $config_struct = {
 	'forward_http_port'=>'(NUMBER)',
 	'forward_https_address'=>'(DOMAIN|IP)', # ACHTUNG, evtl. nur auf IP
 	'forward_https_port'=>'(NUMBER)',
-	'flash_policy_domain'=>'(DOMAIN|IP)',
-	'flash_policy_port'=>'(NUMBER)',
 	'max_connections_per_ip'=>'(NUMBER)',
 	'compress_min_bytes'=>'(NUMBER)',
 	'compress_level'=>'(NUMBER)',
